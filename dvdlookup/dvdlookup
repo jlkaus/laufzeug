@@ -1,0 +1,368 @@
+#!/usr/bin/perl -w
+
+use strict;
+use JSON 2.07;
+use LWP::UserAgent;
+use Term::ReadLine;
+
+# arguments to this should be:
+# -c: command ( [query] | insert )
+# -e: extent ( [targets] | contents | containers | productions )
+# -d: device ( [/dev/dvd] )
+
+# For queries, one of the following could be specified to use for the query instead of the disc:
+# -v: <volume id>
+# -pt: <product title>
+# -pcode: <product code>
+# -pid: <product id>
+
+# For inserts, a couple of other things should be specified, or they will be asked during runtime:
+# -pid: <product id> (Will NOT be asked if not specified)
+# -s: <disc sequence in product>  (Will be asked if not specified)
+# -p: <product code> <release date> <product title> (These will be asked if not specified)
+
+# Examples:
+# dvdlookup [--query|-q] [-d [/dev/dvd]]
+# dvdlookup [--query|-q] -v VOLUME ID
+# dvdlookup [--query|-q] -pt Product title
+# dvdlookup [--query|-q] -pid <product id>
+# dvdlookup [--query|-q] -pcode <product code>
+# dvdlookup --insert|i [-d [/dev/dvd]] [-s <sequence>] [-pid <product id>|-p <product_code> <release_date> <product_title>]
+
+my $dvdinfo = "/usr/local/bin/dvdinfo";
+
+my $device = "/dev/dvd";
+my $cmd = "query";
+my $extent = "targets";
+
+my $volumeid = "";
+my $productid = "";
+my $discid = "";
+
+my $type = "DVD";
+my $region = "";
+my $volsetid = "";
+
+my $sequence = "";
+my $productcode = "";
+my $producttitle = "";
+my $productdate = "";
+
+my $hloaded = 0;
+my @hlines = ();
+my $termrl = undef;
+
+sub getTermAndChangeHistory {
+    my $pfix = shift;
+
+    if(! defined $termrl) {
+	$termrl = new Term::ReadLine 'dvdlookup';
+    }
+
+    if($termrl->Features()->{'setHistory'}) {
+
+	if(! $hloaded) {
+	    if(open(HST, "$ENV{HOME}/.dvdlookup_history")) {
+		@hlines = <HST>;
+		close(HST);
+	    }
+	    $hloaded = 1;
+	}
+	
+	my @tmps =();
+	
+	foreach( @hlines) {
+	    chomp;
+	    if(/^${pfix}/) {
+		push @tmps, substr($_,3);
+	    }
+	}
+	
+	$termrl->SetHistory(@tmps);
+    }
+    
+    return $termrl;
+}
+
+sub addToHistory {
+    my $pfix = shift;
+    my $hst = shift;
+
+    if(defined $termrl) {
+	if($termrl->Features()->{'setHistory'}) {
+	    open(HST, ">>","$ENV{HOME}/.dvdlookup_history");
+	    print HST "$pfix$hst\n";
+	    close(HST);
+	}
+    }
+}
+
+
+while(@ARGV) {
+    my $temp = shift @ARGV;
+    if($temp eq "-d") {
+	$device = shift @ARGV || "/dev/dvd";
+    } elsif($temp eq "-q" || $temp eq "--query") {
+	$cmd = "query";
+    } elsif($temp eq "-i" || $temp eq "--insert") {
+	$cmd = "insert";
+    } elsif($temp eq "-e") {
+	$extent = shift @ARGV || "targets";
+    } elsif($temp eq "-v") {
+	$volumeid = join(' ',@ARGV);
+	last;
+    } elsif($temp eq "-pt") {
+	$producttitle = join(' ',@ARGV);
+	last;
+    } elsif($temp eq "-pcode") {
+	$productcode = shift @ARGV || "";
+    } elsif($temp eq "-pid") {
+	$productid = shift @ARGV || "";
+    } elsif($temp eq "-s") {
+	$sequence = shift @ARGV || "";
+    } elsif($temp eq "-p") {
+	$productcode = shift @ARGV || "";
+	$productdate = shift @ARGV || "";
+	$producttitle = join(' ',@ARGV);
+	last;
+    } else {
+	if($temp ne "-h" && $temp ne "--help" && $temp ne "--morehelp") {
+	    print STDERR "\nArgument not understood:  $temp\n";
+	}
+	print STDERR "\nUsage for query:\n";
+	print STDERR "\tdvdlookup [-d <device>] [--query] [-e <extent>] [-v <volume id> | -pt <product title> | -pcode <product code> | -pid <product id>]\n\n";
+	print STDERR "Usage for insert:\n";
+	print STDERR "\tdvdlookup [-d <device>] --insert [-s <sequence number>] [-pid <product id> | -p <product code> <release date> <product title>]\n\n";
+	print STDERR "Other notes:\n";
+	print STDERR "\t* By default a query using the disc id from the disc in /dev/dvd is assumed.\n";
+	print STDERR "\t* Release date is either in YYYY-MM-DD or YYYY format.\n";
+	print STDERR "\t* For an insert, if not specified on the command line, the program will prompt for sequence number, product code, release date, and product title during runtime.\n";
+	print STDERR "\nUse the -h or --help to see this help again, or --morehelp option to get more examples and details.\n\n";
+    
+	if($temp eq "--morehelp") {   
+	    print STDERR "-q|--query: Execute a query command (the default mode)\n";
+	    print STDERR "-i|--insert: Execute an insert command\n";
+	    print STDERR "-h|--help: Show brief help information\n";
+	    print STDERR "--morehelp: Show this extended help information\n";
+	    print STDERR "-e <extent>: Specifies the extent of the query (options: [targets] | contents | containers | productions )\n";
+	    print STDERR "-d <device>: Specifies device (defaults to /dev/dvd)\n";
+	    print STDERR "-v: <volume id>\n";
+	    print STDERR "-pt: <product title>\n";
+	    print STDERR "-pcode: <product code>\n";
+	    print STDERR "-pid: <product id>\n";
+	    print STDERR "-s: <disc sequence in product>  (For inserts only. Will be asked if not specified)\n";
+	    print STDERR "-p: <product code> <release date> <product title> (For inserts only.  These will be asked if not specified.\n";
+	    print STDERR "\n";
+	    print STDERR "When data must be asked of the user, it is saved in a history file at ~/.dvdlookup_history and used again next time.\n";
+	    print STDERR "The history is specific to each question and can be accessed by using the up and down arrows.\n";
+	    print STDERR "\n";
+	    print STDERR "Examples:\n";
+	    print STDERR "dvdlookup\n";
+	    print STDERR "\tDoes a query based on the disc in /dev/dvd\n\n";
+	    print STDERR "dvdlookup --query -v VOLUME ID\n";
+	    print STDERR "\tDoes a query based on the specified volume id\n\n";
+	    print STDERR "dvdlookup -q -pt Product title\n";
+	    print STDERR "\tDoes a query based on the specified product title\n\n";
+	    print STDERR "dvdlookup -pid <product id>\n";
+	    print STDERR "\tDoes a query based on the specified product id\n\n";
+	    print STDERR "dvdlookup --query -pcode <product code>\n";
+	    print STDERR "\tDoes a query based on the specified product code\n\n";
+	    print STDERR "dvdlookup --insert -d /dev/dvd -s 1 -p 2456789105 2000-04-07 Stupid Movie: Director\\'s Cut\n";
+	    print STDERR "\tDoes an insert of the disc in /dev/dvd and product as specified and links them together with sequence number 1.\n\n";
+	}
+	exit;
+    }
+}
+
+if($cmd eq "insert" || ($volumeid eq "" && $productid eq "" && $producttitle eq "")) {
+    my @dvd_info = `${dvdinfo} ${device} DVDINF`;
+
+    foreach (@dvd_info) {
+	if(/^DR DISCID:  (.*)$/) {
+	    $discid=$1;
+	} elsif(/^DR VOLID:   (.*)$/) {
+	    $volumeid=$1;
+	} elsif(/^DR SETID:   (.*)$/) {
+	    $volsetid=$1;
+	} elsif(/^DR REGION:  (.*)$/) {
+	    $region=$1;
+	}
+    }
+}
+
+if($cmd eq "insert") {
+
+    my $trm;
+
+    if($sequence eq "") {
+	$trm = getTermAndChangeHistory("SEQ");
+	$sequence = $trm->readline("Sequence of disc in product [1]: ") || "1";
+	addToHistory("SEQ", $sequence);
+    }
+
+    if($productid eq "") {
+	if($productcode eq "") {
+	    $trm = getTermAndChangeHistory("COD");
+	    $productcode = $trm->readline("Product code (UPC or EIN, with checkdigits) [000000000000]: ") || "000000000000";
+	    addToHistory("COD", $productcode);
+	}
+	
+	if($productdate eq "") {
+	    $trm = getTermAndChangeHistory("DAT");
+	    $productdate = $trm->readline("Product release date (YYYY-MM-DD or YYYY) [0000-00-00]: ") || "0000-00-00";
+	    if(length $productdate == 4) {
+		$productdate.="-01-01";
+	    }
+	    addToHistory("DAT", $productdate);
+	}
+	if($producttitle eq "") {
+	    $trm = getTermAndChangeHistory("TIT");
+	    while($producttitle eq "") {
+		$producttitle = $trm->readline("Product title (cannot be blank!): ");
+	    }
+	    addToHistory("TIT", $producttitle);
+	}
+    }
+}
+
+print "\nDVD Location: $device\n";
+print "Command: $cmd\n";
+
+my $request_str = "";
+
+if($cmd eq "insert") {
+    print "Disc type: $type\n";
+    print "Disc id: $discid\n";
+    print "Disc volume id: \"$volumeid\"\n";
+    print "Disc volume set id: $volsetid\n";
+    print "Disc region code: $region\n";
+    if($productid ne "") {
+	print "Product id: $productid\n";
+    } else {
+	print "Product code: $productcode\n";
+	print "Product date: $productdate\n";
+	print "Product title: \"$producttitle\"\n";
+    }
+
+    print "Sequence: $sequence\n";
+
+    # compute actual insert here
+    my $discdata={};
+    my $productdata={};
+
+    my $argsdata={};
+
+    $discdata->{'id'} = $discid;
+    $discdata->{'volid'} = $volumeid;
+    $discdata->{'setid'} = $volsetid;
+    $discdata->{'type'} = $type;
+    $discdata->{'regioncode'} = $region;
+    
+    if($discid ne "") {
+	$argsdata->{'disc'} = $discdata;
+    }
+
+    if($productid ne "") {
+	$productdata->{'id'} = $productid;
+    } else {
+	$productdata->{'code'} = $productcode;
+	$productdata->{'title'} = $producttitle;
+	$productdata->{'release'} = $productdate;
+    }
+
+    $argsdata->{'product'} = $productdata;
+    if($sequence ne "") {
+	$argsdata->{'sequence'} = $sequence;
+    }
+
+    my $request=[];
+    push @{$request} , {'cmd'=>'simple-insert',
+			'args'=> $argsdata };
+
+    $request_str = encode_json $request;
+
+} elsif($cmd eq "query") {
+    my $thehow="";
+    my $thesearch="";
+    my $theq="";
+
+    if($discid ne "") {
+	print "Disc id: $discid\n";
+	print "Disc region code: $region\n";
+	$theq="discs";
+	$thehow="id";
+	$thesearch=$discid;
+    } elsif($volumeid ne "") {
+	print "Disc volume id: \"$volumeid\"\n";
+	$theq="discs";
+	$thehow="vol";
+	$thesearch=$volumeid;
+    } elsif($productid ne "") {
+	print "Product id: $productid\n";
+	$theq="products";
+	$thehow="id";
+	$thesearch=$productid;
+    } elsif($productcode ne "") {
+	print "Product code: $productcode\n";
+	$theq="products";
+	$thehow="code";
+	$thesearch=$productcode;
+    } elsif($producttitle ne "") {
+	print "Product title: \"$producttitle\"\n";
+	$theq="products";
+	$thehow="title";
+	$thesearch=$producttitle;
+    } else {
+	print STDERR "Not enough information to perform the query.\n";
+	exit;
+    }
+
+    # compute actual query here
+    my $request=[];
+
+    push @{$request}, {'cmd'=>'simple-query',
+		       'args'=>{'q'=>"$theq",
+				"$thehow"=>$thesearch,
+				'extent'=>$extent
+		       }
+    };
+
+    $request_str = encode_json $request;
+} else {
+    print STDERR "Invalid command specified.\n";
+    exit;
+}
+
+if($request_str ne "") {
+    print $request_str;
+    print "\n\n";
+    print "Making request to http://beta.dvdlookup.org/api/remote.php now...\n\n";
+
+    my $ua = LWP::UserAgent->new;
+    $ua->agent("DvdLookup/1.1 ");
+
+    my $req = HTTP::Request->new(POST => 'http://beta.dvdlookup.org/api/remote.php');
+    $req->content_type('application/json');
+    $req->header(Accept => 'application/json');
+    $req->content($request_str);
+    
+    # Pass request to the user agent and get a response back
+    my $res = $ua->request($req);
+    
+    # Check the outcome of the response
+    if ($res->is_success) {
+	print $res->content;
+    }
+    else {
+	print $res->status_line, "\n";
+    }
+
+} else {
+    print STDERR "Empty request string.  Not sent to server.\n";
+}
+
+
+
+
+exit;
+
