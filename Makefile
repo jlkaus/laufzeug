@@ -1,19 +1,21 @@
-laufzeug:  laufzeug.c
+.PHONY: all clean
+
+all: laufzeug dvdinfo discinfo ldiscid
+
+laufzeug:  discinfo.c
 	gcc -o $@ $< -ldiscid -DNOLIBDVDREAD
 
-dvdinfo:  laufzeug.c
+dvdinfo:  discinfo.c
 	gcc -o $@ $< -ldvdread -DNOLIBDISCID
 
-ldiscid: laufzeug.c
+discinfo:  discinfo.c
+	gcc -o $@ $< -ldiscid -ldvdread
+
+ldiscid: discinfo.c
 	gcc -o $@ $< -DNOLIBDVDREAD -DNOLIBDISCID
 
-all: laufzeug dvdinfo ldiscid
-
-install:
-	cp dvdinfo /usr/local/bin/dvdinfo
-
-
-.PHONY: clean
+install: dvdinfo
+	install -t /usr/local/bin/dvdinfo dvdinfo
 
 clean:
-	rm -f laufzeug dvdinfo ldiscid
+	rm -f laufzeug discinfo dvdinfo ldiscid
