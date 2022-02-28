@@ -20,6 +20,198 @@
 #include "dvdid.h"
 #endif
 
+#define xstr(s) str(s)
+#define str(s) #s
+
+const char *argp_program_version = xstr(EXECNAME) " " xstr(VERSION);
+const char *argp_program_bug_address = xstr(PKGMAINT);
+static char program_documentation[] = xstr(EXECNAME) " - A tool for something.\
+\vMore stuff here.\n";
+
+static char args_doc[] = "";
+
+static struct argp_option program_options[] = {
+  {"verbose",           'v',0,          0,"Verbose mode."},
+  {"device",            'd',"DEVICE",   0,"Drive device. Defaults to /dev/cdrom"},
+  {"close",             'c',0,          0,"Close the drive (close tray, if supported)."},
+  {"open",              'o',0,          0,"Open the drive (eject)."},
+  {"eject",             'e',0,          OPTION_ALIAS, 0},
+  {"mediachange",       'm',0,          0,"Check for media change."},
+  {"lock",              'l',0,          0,"Lock drive."},
+  {"unlock",            'u',0,          0,"Unlock drive."},
+  {"status",            's',0,          0,"Get drive status."},
+  {"get",               'g',"ITEMS",    0,"Get disc information, as specified by ITEMS."},
+  {0,                   'h',0,          OPTION_HIDDEN, 0,-1},
+  {0}
+};
+
+#define GET_MCN 1
+#define GET_FDID 2
+#define GET_FDTOC 4
+#ifndef NOLIBDISCID
+#define GET_MBID 8
+#define GET_MBTOC 16
+#endif
+#ifndef NOLIBDVDREAD
+#define GET_DRID 32
+#define GET_DRTOC 64
+#define GET_DRVOL 128
+#define GET_DRSET 256
+#define GET_DRREG 512
+#endif
+
+#ifndef NOLIBDISCID
+#ifndef NOLIBDVDREAD
+#define DEFAULT_GETS (GET_FDID | GET_MBID | GET_DRID)
+#else
+#define DEFAULT_GETS (GET_FDID | GET_MBID)
+#endif
+#else
+#ifndef NOLIBDVDREAD
+#define DEFAULT_GETS (GET_FDID | GET_DRID)
+#else
+#define DEFAULT_GETS (GET_FDID)
+#endif
+#endif
+
+struct program_arguments {
+  int verbose;
+  char *device;
+  int do_close;
+  int do_lock;
+  int do_mediachange;
+  int do_status;
+  int get_mask;
+  int do_unlock;
+  int do_open;
+  int any_op;
+};
+
+int parseGetItems(char *arg, struct argp_state *state) {
+  char *curstate = NULL;
+  int item_set = 0;
+  char *cur_pos = strtok_r(arg, ":,; ", &curstate);
+  while(cur_pos) {
+    if(strcasecmp(cur_pos, "mcn") == 0) {
+      item_set |= GET_MCN;
+    } else if(strcasecmp(cur_pos, "fdid") == 0) {
+      item_set |= GET_FDID;
+    } else if(strcasecmp(cur_pos, "fdtoc") == 0) {
+      item_set |= GET_FDTOC;
+    } else if(strcasecmp(cur_pos, "fd") == 0) {
+      item_set |= GET_FDID | GET_FDTOC;
+#ifndef NOLIBDISCID
+    } else if(strcasecmp(cur_pos, "mbid") == 0) {
+      item_set |= GET_MBID;
+    } else if(strcasecmp(cur_pos, "mbtoc") == 0) {
+      item_set |= GET_MBTOC;
+    } else if(strcasecmp(cur_pos, "mb") == 0) {
+      item_set |= GET_MBID | GET_MBTOC;
+#endif
+    } else if(strcasecmp(cur_pos, "cd") == 0) {
+      item_set |= GET_MCN;
+      item_set |= GET_FDID | GET_FDTOC;
+#ifndef NOLIBDISCID
+      item_set |= GET_MBID | GET_MBTOC;
+#endif
+#ifndef NOLIBDVDREAD
+    } else if(strcasecmp(cur_pos, "drid") == 0) {
+      item_set |= GET_DRID;
+    } else if(strcasecmp(cur_pos, "drtoc") == 0) {
+      item_set |= GET_DRTOC;
+    } else if(strcasecmp(cur_pos, "drvol") == 0) {
+      item_set |= GET_DRVOL;
+    } else if(strcasecmp(cur_pos, "drset") == 0) {
+      item_set |= GET_DRSET;
+    } else if(strcasecmp(cur_pos, "drreg") == 0) {
+      item_set |= GET_DRREG;
+    } else if(strcasecmp(cur_pos, "dr") == 0 ||
+              strcasecmp(cur_pos, "dvd") == 0) {
+      item_set |= GET_DRID | GET_DRTOC;
+      item_set |= GET_DRVOL | GET_DRSET | GET_DRREG;
+#endif
+    } else if(strcasecmp(cur_pos, "all") == 0) {
+      item_set |= GET_MCN;
+      item_set |= GET_FDID | GET_FDTOC;
+#ifndef NOLIBDISCID
+      item_set |= GET_MBID | GET_MBTOC;
+#endif
+#ifndef NOLIBDVDREAD
+      item_set |= GET_DRID | GET_DRTOC;
+      item_set |= GET_DRVOL | GET_DRSET | GET_DRREG;
+#endif
+    } else {
+      argp_failure(state, EX_USAGE, 0, "Invalid --get ITEM: %s", cur_pos);
+    }
+
+    cur_pos = strtok_r(NULL, ":,; ", &curstate);
+  }
+  return item_set;
+}
+
+static error_t parse_opt(int key, char *arg, struct argp_state *state) {
+  struct program_arguments *args = state->input;
+
+  switch(key) {
+  case '?':
+  case 'h':
+    argp_state_help(state, stderr, ARGP_HELP_STD_HELP);
+    break;
+  case 'v':
+    args->verbose = 1;
+    break;
+  case 'd':
+    args->device = arg;
+    break;
+  case 'e':
+  case 'o':
+    args->do_open = 1;
+    args->any_op = 1;
+    break;
+  case 'c':
+    args->do_close = 1;
+    args->any_op = 1;
+    break;
+  case 'l':
+    args->do_lock = 1;
+    args->any_op = 1;
+    break;
+  case 'u':
+    args->do_unlock = 1;
+    args->any_op = 1;
+    break;
+  case 's':
+    args->do_status = 1;
+    args->any_op = 1;
+    break;
+  case 'm':
+    args->do_mediachange = 1;
+    args->any_op = 1;
+    break;
+  case 'g':
+    args->get_mask |= parseGetItems(arg, state);
+    args->any_op = 1;
+    break;
+  case ARGP_KEY_ARG:
+    argp_failure(state, EX_USAGE, 0, "No non-option arguments supported.");
+    break;
+  case ARGP_KEY_END:
+    break;
+  case ARGP_KEY_SUCCESS:
+    if(!args->any_op) {
+      args->get_mask = DEFAULT_GETS;
+    }
+    break;
+  default:
+    return ARGP_ERR_UNKNOWN;
+  }
+
+  return 0;
+}
+
+static struct argp program_arg_parser = {program_options, parse_opt, args_doc, program_documentation};
+
+
 // args: device	command
 //		LCKDRV	lock-drive
 //		UNLOCK	unlock-drive
@@ -66,7 +258,14 @@
 
 // args1 = device
 // args2 = command
-int main(int argc, char** argv) {
+int main(int argc, char* argv[]) {
+  program_invocation_name = xstr(EXECNAME);
+
+  // interpret arguments
+  struct program_arguments args = {0, "/dev/cdrom", 0, 0, 0, 0, 0, 0, 0, 0};
+  argp_parse(&program_arg_parser, argc, argv, 0, 0, &args);
+
+
   int retCode = EX_OK;
 
   if(argc == 3) {
