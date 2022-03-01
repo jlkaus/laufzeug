@@ -31,16 +31,16 @@ static char program_documentation[] = xstr(EXECNAME) " - A tool for something.\
 static char args_doc[] = "";
 
 static struct argp_option program_options[] = {
-  {"verbose",           'v',0,          0,"Verbose mode."},
-  {"device",            'd',"DEVICE",   0,"Drive device. Defaults to /dev/cdrom"},
-  {"close",             'c',0,          0,"Close the drive (close tray, if supported)."},
-  {"open",              'o',0,          0,"Open the drive (eject)."},
-  {"eject",             'e',0,          OPTION_ALIAS, 0},
-  {"mediachange",       'm',0,          0,"Check for media change."},
-  {"lock",              'l',0,          0,"Lock drive."},
-  {"unlock",            'u',0,          0,"Unlock drive."},
-  {"status",            's',0,          0,"Get drive status."},
-  {"get",               'g',"ITEMS",    0,"Get disc information, as specified by ITEMS."},
+  {"device",            'd',"DEVICE",   0,"Drive device. Defaults to /dev/cdrom",1},
+  {"close",             'c',0,          0,"Close the drive (close tray, if supported).",2},
+  {"open",              'o',0,          0,"Open the drive (eject).",2},
+  {"eject",             'e',0,          OPTION_ALIAS, 0,2},
+  {"lock",              'l',0,          0,"Lock drive.",2},
+  {"unlock",            'u',0,          0,"Unlock drive.",2},
+  {"mediachange",       'm',0,          0,"Check for media change.",3},
+  {"status",            's',0,          0,"Get drive status.",3},
+  {"get",               'g',"ITEMS",    0,"Get disc information, as specified by ITEMS.",3},
+  {"verbose",           'v',0,          0,"Verbose mode.",-1},
   {0,                   'h',0,          OPTION_HIDDEN, 0,-1},
   {0}
 };
@@ -48,9 +48,14 @@ static struct argp_option program_options[] = {
 #define GET_MCN 1
 #define GET_FDID 2
 #define GET_FDTOC 4
+#define GET_FDINFO (GET_FDID | GET_FDTOC)
 #ifndef NOLIBDISCID
 #define GET_MBID 8
 #define GET_MBTOC 16
+#define GET_MBINFO (GET_MBID | GET_MBTOC)
+#define GET_CDINFO (GET_MCN | GET_FDINFO | GET_MBINFO)
+#else
+#define GET_CDINFO (GET_MCN | GET_FDINFO)
 #endif
 #ifndef NOLIBDVDREAD
 #define GET_DRID 32
@@ -58,7 +63,9 @@ static struct argp_option program_options[] = {
 #define GET_DRVOL 128
 #define GET_DRSET 256
 #define GET_DRREG 512
+#define GET_DVDINFO (GET_DRID | GET_DRTOC | GET_DRVOL | GET_DRSET | GET_DRREG)
 #endif
+#define GET_ALL (GET_CDINFO | GET_DVDINFO)
 
 #ifndef NOLIBDISCID
 #ifndef NOLIBDVDREAD
@@ -99,21 +106,17 @@ int parseGetItems(char *arg, struct argp_state *state) {
     } else if(strcasecmp(cur_pos, "fdtoc") == 0) {
       item_set |= GET_FDTOC;
     } else if(strcasecmp(cur_pos, "fd") == 0) {
-      item_set |= GET_FDID | GET_FDTOC;
+      item_set |= GET_FDINFO;
 #ifndef NOLIBDISCID
     } else if(strcasecmp(cur_pos, "mbid") == 0) {
       item_set |= GET_MBID;
     } else if(strcasecmp(cur_pos, "mbtoc") == 0) {
       item_set |= GET_MBTOC;
     } else if(strcasecmp(cur_pos, "mb") == 0) {
-      item_set |= GET_MBID | GET_MBTOC;
+      item_set |= GET_MBINFO;
 #endif
     } else if(strcasecmp(cur_pos, "cd") == 0) {
-      item_set |= GET_MCN;
-      item_set |= GET_FDID | GET_FDTOC;
-#ifndef NOLIBDISCID
-      item_set |= GET_MBID | GET_MBTOC;
-#endif
+      item_set |= GET_CDINFO;
 #ifndef NOLIBDVDREAD
     } else if(strcasecmp(cur_pos, "drid") == 0) {
       item_set |= GET_DRID;
@@ -127,19 +130,19 @@ int parseGetItems(char *arg, struct argp_state *state) {
       item_set |= GET_DRREG;
     } else if(strcasecmp(cur_pos, "dr") == 0 ||
               strcasecmp(cur_pos, "dvd") == 0) {
-      item_set |= GET_DRID | GET_DRTOC;
-      item_set |= GET_DRVOL | GET_DRSET | GET_DRREG;
+      item_set |= GET_DVDINFO;
 #endif
-    } else if(strcasecmp(cur_pos, "all") == 0) {
-      item_set |= GET_MCN;
-      item_set |= GET_FDID | GET_FDTOC;
+    } else if(strcasecmp(cur_pos, "id") == 0 ||
+              strcasecmp(cur_pos, "ids") == 0) {
+      item_set |= GET_FDID;
 #ifndef NOLIBDISCID
-      item_set |= GET_MBID | GET_MBTOC;
+      item_set |= GET_MBID;
 #endif
 #ifndef NOLIBDVDREAD
-      item_set |= GET_DRID | GET_DRTOC;
-      item_set |= GET_DRVOL | GET_DRSET | GET_DRREG;
+      item_set |= GET_DRID;
 #endif
+    } else if(strcasecmp(cur_pos, "all") == 0) {
+      item_set |= GET_ALL;
     } else {
       argp_failure(state, EX_USAGE, 0, "Invalid --get ITEM: %s", cur_pos);
     }
@@ -265,54 +268,61 @@ int main(int argc, char* argv[]) {
   struct program_arguments args = {0, "/dev/cdrom", 0, 0, 0, 0, 0, 0, 0, 0};
   argp_parse(&program_arg_parser, argc, argv, 0, 0, &args);
 
+  // Do the work
+  if(args.do_close) {
+    closeDrive(args.device);
+  }
 
-  int retCode = EX_OK;
+  if(args.do_lock) {
+    lockDrive(args.device);
+  }
 
-  if(argc == 3) {
-    if(!strncmp(argv[2],"GETIDS",6)) {
-      if((retCode = getDriveStatus(argv[1])) == CDS_AUDIO) {
-        //// Note: MCNs take a while to compute, and my test
-        //// discs didn't have one anyway (all 0000000000000)
-        //  char mcnbuff[512];
-        //  if(getDiscMcn(argv[1], mcnbuff, 512) == 0) {
-        //    printf("MCN:        %s\n",mcnbuff);
-        //  } else {
-        //    printf("MCN:        \n");
-        //  }
-        struct cdrom_tochdr* myTocHead;
-        struct cdrom_tocentry* myTocEntries;
-        retCode = getTocData(argv[1], &myTocHead, &myTocEntries);
-        if(retCode == EX_OK) {
+  if(args.do_mediachange) {
+    getMediaChange(args.device);
+  }
 
-#ifndef NOLIBDISCID
-          // compute mb discid
-          retCode = displayMbDiscId(argv[1]);
-          displayMbToc(myTocHead, myTocEntries);
-#endif
+  if(args.do_status) {
+    getDriveStatus(args.device);
+  }
 
-          displayFdDiscId(myTocHead, myTocEntries);
-          displayFdToc(myTocHead, myTocEntries);
+  if(args.get_mask) {
+    if(args.get_mask & GET_CDINFO) {
+      if(getDriveStatus(args.device) == CDS_AUDIO) {
+        if(args.get_mask & GET_MCN) {
+          char mcnbuff[512];
+          if(getDiscMcn(args.device, mcnbuff, 512) == 0) {
+            printf("MCN:        %s\n",mcnbuff);
+          } else {
+            printf("MCN:        \n");
+          }
+        }
+        if(args.get_mask & ~GET_MCN & GET_ALL) {
+          struct cdrom_tochdr* myTocHead;
+          struct cdrom_tocentry* myTocEntries;
+          getTocData(args.device, &myTocHead, &myTocEntries);
+
+          if(args.get_mask & GET_FDID) {
+
+          }
+          if(args.get_mask & GET_FDTOC) {
+
+          }
+          if(args.get_mask & GET_MBID) {
+
+          }
+          if(args.get_mask & GET_MBTOC) {
+
+          }
 
           free(myTocHead);
           free(myTocEntries);
         }
       }
-    } else if(!strncmp(argv[2],"DRVSTS",6)) {
-      retCode = getDriveStatus(argv[1]);
-    } else if(!strncmp(argv[2],"MDACHG",6)) {
-      retCode = getMediaChange(argv[1]);
-    } else if(!strncmp(argv[2],"OPNDRV",6)) {
-      retCode = openDrive(argv[1]);
-    } else if(!strncmp(argv[2],"CLSDRV",6)) {
-      retCode = closeDrive(argv[1]);
-    } else if(!strncmp(argv[2],"LCKDRV",6)) {
-      retCode = lockDrive(argv[1]);
-    } else if(!strncmp(argv[2],"UNLOCK",6)) {
-      retCode = unlockDrive(argv[1]);
     }
 #ifndef NOLIBDVDREAD
-    else if(!strncmp(argv[2],"DVDINF",6)) {
-      // if((retCode = getDriveStatus(argv[1])) == CDS_DISC_OK) {
+    if(args.get_mask & GET_DVDINFO) {
+      // if(getDriveStatus(args.device) == CDS_DISC_OK) {
+
       // display everything I have about the DVD (assuming thats what it is.  Can I assume it will look like a data cdrom? Gah! no! could call it on ISOs)
 
       char discidbuff[16];
@@ -322,46 +332,48 @@ int main(int argc, char* argv[]) {
       DvdToc* titleTocs=NULL;
       uint8_t regionCode;
 
-      retCode = getDvdDiscId(argv[1], discidbuff);
+      retCode = getDvdDiscId(args.device, discidbuff);
 
       if(retCode == EX_OK) {
         displayDvdDiscId(discidbuff);
-        retCode = getDvdVolumeId(argv[1], volidbuff);
+        retCode = getDvdVolumeId(args.device, volidbuff);
       }
 
       if(retCode == EX_OK) {
         displayDvdVolumeId(volidbuff);
-        retCode = getDvdSetId(argv[1], setidbuff);
+        retCode = getDvdSetId(args.device, setidbuff);
       }
 
       if(retCode == EX_OK) {
         displayDvdSetId(setidbuff);
-        retCode = getDvdToc(argv[1], &titleTocs, &numTitles);
+        retCode = getDvdToc(args.device, &titleTocs, &numTitles);
       }
 
       if(retCode == EX_OK) {
         displayDvdToc(titleTocs, numTitles);
         free(titleTocs);
-        retCode = getDvdRegion(argv[1], &regionCode);
+        retCode = getDvdRegion(args.device, &regionCode);
       }
 
       if(retCode == EX_OK) {
         printf("DR REGION:  %02hhx\n",regionCode);
       }
 
+
       // }
     }
 #endif
-    else {
-      // no good command
-      retCode = -EINVAL;
-    }
-  } else {
-    // not enough args
-    retCode = -EINVAL;
   }
 
-  return retCode;
+  if(args.do_unlock) {
+    unlockDrive(args.device);
+  }
+
+  if(args.do_open) {
+    openDrive(args.device);
+  }
+
+  return EX_OK;
 }
 
 

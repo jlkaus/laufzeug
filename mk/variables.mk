@@ -1,5 +1,5 @@
-PKGNAME = laufzeug
-PKGPROGS = dvdinfo discinfo ldiscid discid
+PKGNAME = discinfo
+PKGPROGS = discinfo
 PKGMAINT = <jlkaus@gmail.com>
 
 EMPTY :=

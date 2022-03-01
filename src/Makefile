@@ -21,24 +21,25 @@ CFLAGS = $(CDEFS) -D_GNU_SOURCE -D__STDC_LIMIT_MACROS -std=gnu17 -I$(INCDIR) -Wa
 LDFLAGS =
 LDLIBS =
 
+OBJDEPS =
+ifndef NOLIBDISCID
+LDLIBS += -ldiscid
+OBJDEPS += mbid.o
+else
+CFLAGS += -DNOLIBDISCID
+endif
+ifndef NOLIBDVDREAD
+LDLIBS += -ldvdread
+OBJDEPS += dvdid.o
+else
+CFLAGS += -DNOLIBDVDREAD
+endif
+
+
 .PHONY: exec
 exec: $(PKGPROGS)
 
-discid: private CFLAGS += -DNOLIBDVDREAD -DEXECNAME=$@
-discid: discinfo.c  drive.o mbid.o fdid.o
-	$(LINK.c) $^ $(LOADLIBES) $(LDLIBS) -ldiscid -o $@
-
-dvdinfo: private CFLAGS += -DNOLIBDISCID -DEXECNAME=$@
-dvdinfo: discinfo.c drive.o dvdid.o fdid.o
-	$(LINK.c) $^ $(LOADLIBES) $(LDLIBS) -ldvdread -o $@
-
-discinfo: private CFLAGS += -DEXECNAME=$@
-discinfo: discinfo.c drive.o dvdid.o mbid.o fdid.o
-	$(LINK.c) $^ $(LOADLIBES) $(LDLIBS) -ldiscid -ldvdread -o $@
-
-ldiscid: private CFLAGS += -DNOLIBDVDREAD -DNOLIBDISCID -DEXECNAME=$@
-ldiscid: discinfo.c drive.o fdid.o
-	$(LINK.c) $^ $(LOADLIBES) $(LDLIBS) -o $@
-
+discinfo: discinfo.c drive.o fdid.o $(OBJDEPS)
+	$(LINK.c) $^ $(LOADLIBES) $(LDLIBS) -o $@ -DEXECNAME=$@
 
 endif
