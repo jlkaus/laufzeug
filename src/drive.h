@@ -1,10 +1,10 @@
 #include <linux/cdrom.h>
 
-int getDriveStatus(char* device);
-int getDiscMcn(char* device, char* mcnbuffer, int mcnbufflen);
+int getDriveStatus(char* device, int *discStatus);
+void getDiscMcn(char* device, char* mcnbuffer, int mcnbufflen);
 int getMediaChange(char* device);
-int openDrive(char* device);
-int closeDrive(char* device);
-int lockDrive(char* device);
-int unlockDrive(char* device);
-int getTocData(char* device, struct cdrom_tochdr** tochdr, struct cdrom_tocentry** tocents);
+void openDrive(char* device);
+void closeDrive(char* device);
+void lockDrive(char* device);
+void unlockDrive(char* device);
+void getTocData(char* device, struct cdrom_tochdr** tochdr, struct cdrom_tocentry** tocents);

@@ -9,189 +9,170 @@
 #include <string.h>
 #include <error.h>
 #include <sysexits.h>
+#include <assert.h>
 
 #include "drive.h"
 
-int getDriveStatus(char* device) {
-  int retCode = EX_OK;
+int getDriveStatus(char* device, int *discStatus) {
+  int retCode = CDS_NO_INFO;
+  if(discStatus) {
+    *discStatus = CDS_NO_INFO;
+  }
   int fd = open(device, O_RDONLY | O_NONBLOCK);
   if(fd != -1) {
-    int tempRv = ioctl(fd, CDROM_DRIVE_STATUS, 0);
-    if(tempRv == CDS_DISC_OK) {
-      int disctype = ioctl(fd, CDROM_DISC_STATUS, 0);
-
-      if((disctype == CDS_AUDIO) || (disctype == CDS_MIXED)) {
-        retCode = CDS_AUDIO;
-      } else {
-        retCode = CDS_DISC_OK;
-      }
-    } else if(tempRv < 0) {
-      retCode = -errno;
-    } else {
-      retCode = tempRv;
+    retCode = ioctl(fd, CDROM_DRIVE_STATUS, 0);
+    if(retCode == CDS_DISC_OK && discStatus) {
+      *discStatus = ioctl(fd, CDROM_DISC_STATUS, 0);
+    } else if(retCode < 0) {
+      // ENOSYS, ENOMEM
+      error(EX_UNAVAILABLE, errno, "Unable to get drive status from %s", device);
     }
 
     close(fd);
   } else {
-    retCode = -EINVAL;
+    // EACCES, ENOENT
+    error(EX_NOINPUT, errno, "Unable to open device file %s", device);
   }
   return retCode;
 }
 
-int getDiscMcn(char* device, char* mcnbuffer, int mcnbufflen)
+void getDiscMcn(char* device, char* mcnbuffer, int mcnbufflen)
 {
-  int retCode = EX_OK;
-  if(mcnbufflen > 13) {
-    int fd = open(device, O_RDONLY | O_NONBLOCK);
+  assert(mcnbufflen > 13);
 
-    if(fd != -1) {
-      struct cdrom_mcn mcn;
-      int tempRv = ioctl(fd, CDROM_GET_MCN, &mcn);
-      if(tempRv == 0) {
-        strcpy(mcnbuffer, (const char *)mcn.medium_catalog_number);
-      } else {
-        retCode = -errno;
-      }
-      close(fd);
+  int fd = open(device, O_RDONLY | O_NONBLOCK);
+  if(fd != -1) {
+    struct cdrom_mcn mcn;
+    int tempRv = ioctl(fd, CDROM_GET_MCN, &mcn);
+    if(tempRv == 0) {
+      strcpy(mcnbuffer, (const char *)mcn.medium_catalog_number);
     } else {
-      retCode = -EINVAL;
+      // ENOSYS
+      error(EX_UNAVAILABLE, errno, "Unable to get MCN from %s", device);
     }
+    close(fd);
   } else {
-    retCode = -EINVAL;
+    // EACCES, ENOENT
+    error(EX_NOINPUT, errno, "Unable to open device file %s", device);
   }
-  return retCode;
 }
 
 int getMediaChange(char* device)
 {
-  int retCode = EX_OK;
+  int retCode = 0;
   int fd = open(device, O_RDONLY | O_NONBLOCK);
   if(fd != -1) {
     retCode = ioctl(fd, CDROM_MEDIA_CHANGED, 0);
     if(retCode < 0) {
-      retCode = -errno;
+      // ENOSYS
+      error(EX_UNAVAILABLE, errno, "Unable to get media change state from %s", device);
     }
 
     close(fd);
   } else {
-    retCode = -EINVAL;
+    // EACCES, ENOENT
+    error(EX_NOINPUT, errno, "Unable to open device file %s", device);
   }
   return retCode;
 }
 
-int openDrive(char* device)
+void openDrive(char* device)
 {
-  int retCode = EX_OK;
   int fd = open(device, O_RDONLY | O_NONBLOCK);
-
   if(fd != -1) {
     if(ioctl(fd, CDROMEJECT, 0)) {
-      retCode = -errno;
+      // ENOSYS, EBUSY
+      error(EX_UNAVAILABLE, errno, "Unable to eject %s", device);
     }
 
     close(fd);
   } else {
-    retCode = -EINVAL;
+    // EACCES, ENOENT
+    error(EX_NOINPUT, errno, "Unable to open device file %s", device);
   }
-  return retCode;
 }
 
-int closeDrive(char* device)
+void closeDrive(char* device)
 {
-  int retCode = EX_OK;
   int fd = open(device, O_RDONLY | O_NONBLOCK);
-
   if(fd != -1) {
     if(ioctl(fd, CDROMCLOSETRAY, 0)) {
-      retCode = -errno;
+      // ENOSYS, EBUSY
+      error(EX_UNAVAILABLE, errno, "Unable to close tray for %s", device);
     }
 
     close(fd);
   } else {
-    retCode = -EINVAL;
+    // EACCES, ENOENT
+    error(EX_NOINPUT, errno, "Unable to open device file %s", device);
   }
-  return retCode;
 }
 
-int lockDrive(char* device)
+void lockDrive(char* device)
 {
-  int retCode = EX_OK;
   int fd = open(device, O_RDONLY | O_NONBLOCK);
-
   if(fd != -1) {
     if(ioctl(fd, CDROM_LOCKDOOR, 1)) {
-      retCode = -errno;
+      // ENOSYS, EBUSY
+      error(EX_UNAVAILABLE, errno, "Unable to lock %s", device);
     }
 
     close(fd);
   } else {
-    retCode = -EINVAL;
+    // EACCES, ENOENT
+    error(EX_NOINPUT, errno, "Unable to open device file %s", device);
   }
-  return retCode;
 }
 
-int unlockDrive(char* device)
+void unlockDrive(char* device)
 {
-  int retCode = EX_OK;
   int fd = open(device, O_RDONLY | O_NONBLOCK);
-
   if(fd != -1) {
     if(ioctl(fd, CDROM_LOCKDOOR, 0)) {
-      retCode = -errno;
+      // ENOSYS, EBUSY
+      error(EX_UNAVAILABLE, errno, "Unable to unlock %s", device);
     }
 
     close(fd);
   } else {
-    retCode = -EINVAL;
+    // EACCES, ENOENT
+    error(EX_NOINPUT, errno, "Unable to open device file %s", device);
   }
-  return retCode;
 }
 
-int getTocData(char* device, struct cdrom_tochdr** tochdr, struct cdrom_tocentry** tocents) {
-  int retCode = EX_OK;
-
+void getTocData(char* device, struct cdrom_tochdr** tochdr, struct cdrom_tocentry** tocents) {
   *tochdr = malloc(sizeof(struct cdrom_tochdr));
-  if(*tochdr) {
-    int fd = open(device, O_RDONLY | O_NONBLOCK);
+  assert(*tochdr != NULL);
 
-    if(fd != -1) {
-      int tempRv = ioctl(fd, CDROMREADTOCHDR, *tochdr);
-      if(tempRv == 0) {
-        *tocents = malloc(sizeof(struct cdrom_tocentry)*((*tochdr)->cdth_trk1+1));
-        memset(*tocents, 0, sizeof(struct cdrom_tocentry)*((*tochdr)->cdth_trk1+1));
-        if(*tocents) {
-          // get leadout track into 0
-          (*tocents)[0].cdte_track = CDROM_LEADOUT;
-          (*tocents)[0].cdte_format = CDROM_MSF;
-          tempRv = ioctl(fd, CDROMREADTOCENTRY, &(*tocents)[0]);
-
-          int i=0;
-          for(i=(*tochdr)->cdth_trk0;
-              (tempRv == 0) && (i <= (*tochdr)->cdth_trk1);
-              ++i) {
-            (*tocents)[i].cdte_track = i;
-            (*tocents)[i].cdte_format = CDROM_MSF;
-            tempRv = ioctl(fd, CDROMREADTOCENTRY, &(*tocents)[i]);
-          }
-          if(tempRv != 0) {
-            free(*tocents);
-            free(*tochdr);
-            retCode = -errno;
-          }
-        } else {
-          free(*tochdr);
-          retCode = -ENOMEM;
-        }
-      } else {
-        free(*tochdr);
-        retCode = -errno;
+  int fd = open(device, O_RDONLY | O_NONBLOCK);
+  if(fd != -1) {
+    if(ioctl(fd, CDROMREADTOCHDR, *tochdr) == 0) {
+      *tocents = malloc(sizeof(struct cdrom_tocentry)*((*tochdr)->cdth_trk1+1));
+      assert(*tocents != NULL);
+      memset(*tocents, 0, sizeof(struct cdrom_tocentry)*((*tochdr)->cdth_trk1+1));
+      // get leadout track into 0
+      (*tocents)[0].cdte_track = CDROM_LEADOUT;
+      (*tocents)[0].cdte_format = CDROM_MSF;
+      if(ioctl(fd, CDROMREADTOCENTRY, &(*tocents)[0]) != 0) {
+        error(EX_IOERR, errno, "Unable to read TOC entry (LEADOUT) from CD in %s", device);
       }
-      close(fd);
+
+      for(int i=(*tochdr)->cdth_trk0;
+          i <= (*tochdr)->cdth_trk1;
+          ++i) {
+        (*tocents)[i].cdte_track = i;
+        (*tocents)[i].cdte_format = CDROM_MSF;
+        if(ioctl(fd, CDROMREADTOCENTRY, &(*tocents)[i]) != 0) {
+          error(EX_IOERR, errno, "Unable to read TOC entry %d from CD in %s", i, device);
+        }
+      }
     } else {
-      retCode = -EINVAL;
+      error(EX_UNAVAILABLE, errno, "Unable to read TOC header from CD in %s", device);
     }
+
+    close(fd);
   } else {
-    retCode = -ENOMEM;
+    // EACCES, ENOENT
+    error(EX_NOINPUT, errno, "Unable to open device file %s", device);
   }
-  return retCode;
 }

@@ -8,6 +8,7 @@
 #include <string.h>
 #include <error.h>
 #include <sysexits.h>
+#include <assert.h>
 
 #include "drive.h"
 #include "fdid.h"
@@ -278,23 +279,25 @@ int main(int argc, char* argv[]) {
   }
 
   if(args.do_mediachange) {
-    getMediaChange(args.device);
+    int mc = getMediaChange(args.device);
+    printf("MEDIA-CHANGED: %d\n", mc);
   }
 
   if(args.do_status) {
-    getDriveStatus(args.device);
+    int discStatus = 0;
+    int driveStatus = getDriveStatus(args.device, &discStatus);
+    printf("DRIVE-STATUS: %d\n", driveStatus);
+    printf("DISC-STATUS: %d\n", discStatus);
   }
 
   if(args.get_mask) {
     if(args.get_mask & GET_CDINFO) {
-      if(getDriveStatus(args.device) == CDS_AUDIO) {
+      int discStatus = 0;
+      if(getDriveStatus(args.device, &discStatus) == CDS_DISC_OK && (discStatus == CDS_AUDIO || discStatus == CDS_MIXED)) {
         if(args.get_mask & GET_MCN) {
           char mcnbuff[512];
-          if(getDiscMcn(args.device, mcnbuff, 512) == 0) {
-            printf("MCN:        %s\n",mcnbuff);
-          } else {
-            printf("MCN:        \n");
-          }
+          getDiscMcn(args.device, mcnbuff, 512);
+          printf("MCN:        %s\n",mcnbuff);
         }
         if(args.get_mask & ~GET_MCN & GET_ALL) {
           struct cdrom_tochdr* myTocHead;
@@ -302,16 +305,16 @@ int main(int argc, char* argv[]) {
           getTocData(args.device, &myTocHead, &myTocEntries);
 
           if(args.get_mask & GET_FDID) {
-
+            displayFdDiscId(myTocHead, myTocEntries);
           }
           if(args.get_mask & GET_FDTOC) {
-
+            displayFdToc(myTocHead, myTocEntries);
           }
           if(args.get_mask & GET_MBID) {
-
+            displayMbDiscId(args.device);
           }
           if(args.get_mask & GET_MBTOC) {
-
+            displayMbToc(myTocHead, myTocEntries);
           }
 
           free(myTocHead);
@@ -321,46 +324,42 @@ int main(int argc, char* argv[]) {
     }
 #ifndef NOLIBDVDREAD
     if(args.get_mask & GET_DVDINFO) {
-      // if(getDriveStatus(args.device) == CDS_DISC_OK) {
+      int discStatus = 0;
+      if(getDriveStatus(args.device, &discStatus) == CDS_DISC_OK && (discStatus == CDS_DATA_1 || discStatus == CDS_DATA_2)) {
+        // display everything I have about the DVD (assuming thats what it is.  Can I assume it will look like a data cdrom? Gah! no! could call it on ISOs)
 
-      // display everything I have about the DVD (assuming thats what it is.  Can I assume it will look like a data cdrom? Gah! no! could call it on ISOs)
+        if(args.get_mask & GET_DRID) {
+          char discidbuff[16];
+          getDvdDiscId(args.device, discidbuff);
+          displayDvdDiscId(discidbuff);
+        }
 
-      char discidbuff[16];
-      char volidbuff[32];
-      char setidbuff[129];
-      int numTitles=0;
-      DvdToc* titleTocs=NULL;
-      uint8_t regionCode;
+        if(args.get_mask & GET_DRVOL) {
+          char volidbuff[32];
+          getDvdVolumeId(args.device, volidbuff);
+          displayDvdVolumeId(volidbuff);
+        }
 
-      retCode = getDvdDiscId(args.device, discidbuff);
+        if(args.get_mask & GET_DRSET) {
+          char setidbuff[129];
+          getDvdSetId(args.device, setidbuff);
+          displayDvdSetId(setidbuff);
+        }
 
-      if(retCode == EX_OK) {
-        displayDvdDiscId(discidbuff);
-        retCode = getDvdVolumeId(args.device, volidbuff);
+        if(args.get_mask & GET_DRTOC) {
+          int numTitles=0;
+          DvdToc* titleTocs=NULL;
+          getDvdToc(args.device, &titleTocs, &numTitles);
+          displayDvdToc(titleTocs, numTitles);
+          free(titleTocs);
+        }
+
+        if(args.get_mask & GET_DRREG) {
+          uint8_t regionCode;
+          getDvdRegion(args.device, &regionCode);
+          printf("DR-REGION:  %02hhx\n",regionCode);
+        }
       }
-
-      if(retCode == EX_OK) {
-        displayDvdVolumeId(volidbuff);
-        retCode = getDvdSetId(args.device, setidbuff);
-      }
-
-      if(retCode == EX_OK) {
-        displayDvdSetId(setidbuff);
-        retCode = getDvdToc(args.device, &titleTocs, &numTitles);
-      }
-
-      if(retCode == EX_OK) {
-        displayDvdToc(titleTocs, numTitles);
-        free(titleTocs);
-        retCode = getDvdRegion(args.device, &regionCode);
-      }
-
-      if(retCode == EX_OK) {
-        printf("DR REGION:  %02hhx\n",regionCode);
-      }
-
-
-      // }
     }
 #endif
   }

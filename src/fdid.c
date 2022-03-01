@@ -37,11 +37,11 @@ void displayFdDiscId(struct cdrom_tochdr *hdr, struct cdrom_tocentry *entries) {
   //  MUST use modulo here instead of &
   fdid |= (n % 0xff) << 24;
 
-  printf("FD DISCID:  %08x\n",fdid);
+  printf("FD-DISCID:  %08x\n",fdid);
 }
 
 void displayFdToc(struct cdrom_tochdr *hdr, struct cdrom_tocentry *entries) {
-  printf("FD TOC:     %d",
+  printf("FD-TOC:     %d",
          hdr->cdth_trk1);
   for(size_t i=hdr->cdth_trk0; i <= hdr->cdth_trk1; ++i) {
     printf(" %d",
